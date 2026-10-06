@@ -1,6 +1,8 @@
 name: ui-preview
 
-# 画面のリデザインの確認用: ビルドして、各画面を画像にして保存する (Actions の Artifacts から見られる)。
+# 画面のリデザインの確認用。
+# - 各画面を画像にして保存する (Actions の Artifacts から見られる)
+# - インストール用の zip を作り、Releases に「v1.0.0-redesign」として置く (Install.cmd で入れられる)
 on:
   push:
     branches: [redesign-ui]
@@ -25,3 +27,47 @@ jobs:
         with:
           name: ui-preview
           path: ui-preview/*.png
+
+  package:
+    needs: render
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      # Mozc の変換ヘルパーは作るのに 30〜40 分かかるので、本家の v1.0.0 の配布物に入っているものを使う
+      - name: Mozc helper from upstream v1.0.0
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'upstream.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'upstream'
+          Invoke-WebRequest -Uri 'https://github.com/yksr-melt/Meltype/releases/download/v1.0.0/Meltype-1.0.0-windows.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+          $helper = Get-ChildItem -Path $dir -Recurse -Filter 'meltype_mozc_helper.exe' | Select-Object -First 1
+          if ($helper) {
+            New-Item -ItemType Directory -Force -Path native/mozc/bin | Out-Null
+            Copy-Item -Path (Join-Path $helper.DirectoryName '*') -Destination native/mozc/bin -Recurse -Force
+            Write-Host "Mozc の変換ヘルパーを使います: $($helper.DirectoryName)"
+          } else {
+            Write-Warning '本家の配布物に Mozc の変換ヘルパーがありませんでした。Microsoft IME だけで変換します。'
+          }
+      - name: Package
+        shell: powershell
+        run: .\Build-Package.ps1 -Version '1.0.0-redesign'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meltype-package
+          path: dist/Meltype-*.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-redesign
+          target_commitish: ${{ github.sha }}
+          name: Meltype 1.0.0 (リデザイン版)
+          prerelease: true
+          body: |
+            画面をリデザインした版です (設定・変換ボックス・モード表示・トレイ・ユーザー辞書)。
+            入れ方: zip を展開して Install.cmd をダブルクリック。「Windows によって PC が保護されました」と出たら「詳細情報」→「実行」。
+          files: dist/Meltype-*.zip
