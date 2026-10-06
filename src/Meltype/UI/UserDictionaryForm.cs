@@ -43,7 +43,6 @@ internal sealed class UserDictionaryForm : Form
         ForeColor = Theme.Ink;
         _reading.BorderStyle = BorderStyle.FixedSingle;
         _reading.Dock = DockStyle.Fill;
-        _word.FlatStyle = FlatStyle.Flat;
         _word.Dock = DockStyle.Fill;
         _readingPreview.ForeColor = Theme.JapaneseText;
         _readingPreview.BackColor = Theme.Card;
@@ -68,9 +67,9 @@ internal sealed class UserDictionaryForm : Form
         entry.Controls.Add(_readingPreview, 0, 3);
         entry.Controls.Add(_message, 1, 3);
         entry.Controls.Add(add, 1, 4);
-        var entryCard = new CardPanel { Dock = DockStyle.Top, Height = 196, Padding = new Padding(10) };
+        var entryCard = new CardPanel { Dock = DockStyle.Top, Height = 176, Padding = new Padding(10) };
         entryCard.Controls.Add(entry);
-        var entryFrame = new Panel { Dock = DockStyle.Top, Height = 196 + 32, Padding = new Padding(16, 16, 16, 16), BackColor = Theme.Canvas };
+        var entryFrame = new Panel { Dock = DockStyle.Top, Height = 176 + 32, Padding = new Padding(16, 16, 16, 16), BackColor = Theme.Canvas };
         entryFrame.Controls.Add(entryCard);
 
         // 下: ボタンの帯

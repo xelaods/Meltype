@@ -36,6 +36,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly Updater _updater;
     private readonly ToolStripMenuItem _updateItem;
     private readonly ToolStripMenuItem _autoUpdateItem;
+    // アイコンをクリックしたときのパネル。今までのメニューは、パネルの「その他…」から出す
+    private readonly ContextMenuStrip _menu;
+    private readonly TrayPopup _popup;
+    private string _status = "";
 
     public TrayApplicationContext(MeltypeEngine engine)
     {
@@ -65,7 +69,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _engine.AttachComposition(_composition);
 
         // メニューは設定画面と同じ色づかいで描く
-        var menu = new ContextMenuStrip { Renderer = Theme.MenuRenderer, Font = Theme.Body, Padding = new Padding(0, 4, 0, 4) };
+        var menu = _menu = new ContextMenuStrip { Renderer = Theme.MenuRenderer, Font = Theme.Body, Padding = new Padding(0, 4, 0, 4) };
         _statusItem = new ToolStripMenuItem { Enabled = false };
         _enabledItem = new ToolStripMenuItem("Meltype を有効にする", null, (_, _) => ToggleEnabled()) { CheckOnClick = false };
         _keyboardModeItem = new ToolStripMenuItem("Meltype キーボード (変換ボックスで入力)", null, (_, _) => SetMode(InputMode.Keyboard));
@@ -118,8 +122,29 @@ internal sealed class TrayApplicationContext : ApplicationContext
         menu.Opening += (_, _) => startup.Checked = Startup.IsEnabled;
         menu.Opening += (_, _) => UpdateStatus();
 
-        _tray = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
-        _tray.DoubleClick += (_, _) => ToggleEnabled();
+        _popup = new TrayPopup(PopupState, new TrayPopupActions
+        {
+            SetEnabled = on =>
+            {
+                if (_engine.Enabled != on) ToggleEnabled();
+            },
+            SetMode = SetMode,
+            SetLevel = SetLevel,
+            SetProfile = SwitchProfile,
+            Settings = ShowSettings,
+            Dictionary = ShowUserDictionary,
+            Log = ShowLog,
+            Learned = ShowLearnedWords,
+            Update = ApplyUpdate,
+            Exit = ExitThread,
+            More = at => _menu.Show(at, ToolStripDropDownDirection.AboveRight),
+        });
+        // 左クリックでも右クリックでもパネルを出す (一時停止・再開もパネルのスイッチでできる)
+        _tray = new NotifyIcon { Visible = true };
+        _tray.MouseUp += (_, e) =>
+        {
+            if (e.Button is MouseButtons.Left or MouseButtons.Right) _popup.Toggle();
+        };
         _hotkey = new HotkeyWindow(ToggleEnabled);
         _registerHotkey = new HotkeyWindow(RegisterSelectedWord, HotkeyWindow.RegisterWordKeys, "単語の登録");
         _engine.ToggleRequested += OnToggleRequested;
@@ -339,8 +364,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
             status = last is null || last.Text.Length == 0 ? "IME 自動切替: ON" : $"IME 自動切替: ON / 直前の判定: {last.Verdict}";
         }
         _statusItem.Text = status;
+        _status = status;
+        if (_popup is { Visible: true }) _popup.Rebuild();
         var tip = $"Meltype — {status}";
         _tray.Text = tip.Length > 63 ? tip[..63] : tip;
+    }
+
+    /// <summary>トレイのパネルに出す今の状態。</summary>
+    private TrayPopupState PopupState()
+    {
+        var settings = _engine.Settings;
+        return new TrayPopupState(settings.Enabled, settings.Mode, _engine.KeyboardDirect, settings.DetectionLevel,
+            settings.ActiveProfile, settings.ProfileNames.ToList(), _status, Updater.Staged()?.Version);
     }
 
     private void ShowSettings()
@@ -531,6 +566,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _learnedForm?.Close();
         _welcomeForm?.Close();
         _updater.Dispose();
+        _popup.Dispose();
+        _menu.Dispose();
         _hotkey.Dispose();
         _registerHotkey.Dispose();
         _tray.Visible = false;

@@ -22,10 +22,10 @@ internal sealed class SettingsForm : Form
     private readonly MeltypeEngine _engine;
     private readonly List<Binding> _bindings = [];
     private readonly TextBox _testInput = new() { Dock = DockStyle.Top, ImeMode = ImeMode.Disable, BorderStyle = BorderStyle.FixedSingle, Font = Theme.Mono, BackColor = Theme.Canvas };
-    private readonly TextBox _testResult = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None, Font = Theme.Mono, BackColor = Theme.Card, ForeColor = Theme.Ink };
+    private readonly TextBox _testResult = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.FixedSingle, Font = Theme.Mono, BackColor = Theme.Canvas, ForeColor = Theme.Ink };
     private readonly ToolTip _toolTip = new() { AutoPopDelay = 20000 };
     // プロファイル (仕事用・趣味用・SNS 用など) を選ぶ欄
-    private readonly ComboBox _profiles = new() { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = Theme.Body };
+    private readonly ComboBox _profiles = new() { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.Body };
     private bool _loadingProfiles;
 
     // 右側: 分類ごとの見出しとカード。大きさは LayoutBody で決める。
@@ -121,12 +121,12 @@ internal sealed class SettingsForm : Form
         };
 
         var label = new Label { Text = "プロファイル", Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Muted, Font = Theme.Small, BackColor = Theme.Sidebar };
-        var row = new TableLayoutPanel { Dock = DockStyle.Top, Height = 34, ColumnCount = 2, BackColor = Theme.Sidebar, Margin = Padding.Empty };
+        var row = new TableLayoutPanel { Dock = DockStyle.Top, Height = _profiles.PreferredHeight + 4, ColumnCount = 2, BackColor = Theme.Sidebar, Margin = Padding.Empty };
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, _profiles.PreferredHeight + 6));
         _profiles.Dock = DockStyle.Fill;
-        _profiles.Margin = new Padding(0, 2, 4, 0);
-        var more = new Button { Text = "…", Dock = DockStyle.Fill, Margin = new Padding(0, 1, 0, 0), AccessibleName = "プロファイルの操作" };
+        _profiles.Margin = new Padding(0, 2, 6, 0);
+        var more = new Button { Text = "…", Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 2), AccessibleName = "プロファイルの操作" };
         Theme.StyleButton(more);
         more.MinimumSize = Size.Empty;
         more.Padding = Padding.Empty;
@@ -349,7 +349,9 @@ internal sealed class SettingsForm : Form
         _body.SuspendLayout();
         var scale = DeviceDpi / 96F;
         var pad = (int)(28 * scale);
-        var width = Math.Max(320, Math.Min(_body.ClientSize.Width - pad * 2, (int)(860 * scale)));
+        // 縦のスクロールバーが出ても右端が隠れないように、その幅を先に引いておく
+        var available = _body.ClientSize.Width - (_body.VerticalScroll.Visible ? 0 : SystemInformation.VerticalScrollBarWidth);
+        var width = Math.Max(320, Math.Min(available - pad * 2, (int)(860 * scale)));
         var origin = _body.AutoScrollPosition;
         var y = pad;
         foreach (var (header, card, rows, _) in _sections)
@@ -495,7 +497,9 @@ internal sealed class SettingsForm : Form
     private static void StyleGrid(DataGridView grid)
     {
         grid.BackgroundColor = Theme.Card;
-        grid.BorderStyle = BorderStyle.FixedSingle;
+        grid.BorderStyle = BorderStyle.None;
+        grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        grid.RowHeadersVisible = false;
         grid.GridColor = Theme.Divider;
         grid.EnableHeadersVisualStyles = false;
         grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
@@ -510,6 +514,18 @@ internal sealed class SettingsForm : Form
         grid.DefaultCellStyle.SelectionBackColor = Theme.JapaneseSoft;
         grid.DefaultCellStyle.SelectionForeColor = Theme.Ink;
         grid.RowTemplate.Height = 32;
+        // プルダウンの矢印は、編集しているセルにだけ出す (表が矢印だらけにならないように)
+        foreach (var column in grid.Columns.OfType<DataGridViewComboBoxColumn>())
+        {
+            column.DisplayStyle = DataGridViewComboBoxDisplayStyle.Nothing;
+            column.FlatStyle = FlatStyle.Flat;
+        }
+        // 表の外枠 (枠なしにしたので、行の区切りとそろえた線を描く)
+        grid.Paint += (_, e) =>
+        {
+            using var edge = new Pen(Theme.Border);
+            e.Graphics.DrawRectangle(edge, 0, 0, grid.Width - 1, grid.Height - 1);
+        };
     }
 
     private const string SameAsGlobal = "全体と同じ";
@@ -583,7 +599,7 @@ internal sealed class SettingsForm : Form
 
     private ComboBox DropDown(string[] items)
     {
-        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Width = 260, Font = Theme.Body };
+        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 280, Font = Theme.Body };
         combo.Items.AddRange(items);
         combo.SelectedIndexChanged += (_, _) => RunTest();
         return combo;
@@ -736,6 +752,7 @@ internal sealed class SettingsForm : Form
         private readonly Label _description;
         private readonly Control _editor;
         private readonly bool _fullWidth;
+        private readonly bool _hasDescription;
 
         public SettingRow(string name, string description, Control editor, bool fullWidth)
         {
@@ -743,6 +760,7 @@ internal sealed class SettingsForm : Form
             DoubleBuffered = true;
             _editor = editor;
             _fullWidth = fullWidth;
+            _hasDescription = description.Length > 0;
             _name = new Label { Text = name, AutoSize = false, Font = Theme.BodyBold, ForeColor = Theme.Ink, BackColor = Theme.Card, UseMnemonic = false };
             _description = new Label { Text = description, AutoSize = false, Font = Theme.Small, ForeColor = Theme.Muted, BackColor = Theme.Card, UseMnemonic = false, Visible = description.Length > 0 };
             Controls.Add(_name);
@@ -761,9 +779,10 @@ internal sealed class SettingsForm : Form
             int padX = (int)(18 * scale), padY = (int)(14 * scale), gap = (int)(20 * scale);
             var editorWidth = _fullWidth ? 0 : EditorWidth();
             var textWidth = Math.Max(80, width - padX * 2 - (editorWidth > 0 ? editorWidth + gap : 0));
-            const TextFormatFlags flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix;
-            var nameHeight = TextRenderer.MeasureText(_name.Text, _name.Font, new Size(textWidth, int.MaxValue), flags).Height;
-            var descHeight = _description.Visible ? TextRenderer.MeasureText(_description.Text, _description.Font, new Size(textWidth, int.MaxValue), flags).Height : 0;
+            // ラベルが実際に描くときと同じ折り返しで高さを測る (多めに見積もると行の下が空く)
+            var nameHeight = _name.GetPreferredSize(new Size(textWidth, 0)).Height;
+            // Visible は画面に出る前は false なので、説明があるかは自分で覚えておいたもので見る
+            var descHeight = _hasDescription ? _description.GetPreferredSize(new Size(textWidth, 0)).Height : 0;
             _name.SetBounds(padX, padY, textWidth, nameHeight);
             _description.SetBounds(padX, padY + nameHeight + (int)(3 * scale), textWidth, descHeight);
             var textBottom = padY + nameHeight + (descHeight > 0 ? descHeight + (int)(3 * scale) : 0);
