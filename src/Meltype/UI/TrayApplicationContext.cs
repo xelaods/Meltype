@@ -19,9 +19,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly HotkeyWindow _hotkey;
     private readonly HotkeyWindow _registerHotkey;
     private readonly Control _invoker = new();
-    private readonly Icon _onIcon = CreateIcon("あ", Color.FromArgb(0, 120, 212));
-    private readonly Icon _directIcon = CreateIcon("A", Color.FromArgb(0, 120, 212));
-    private readonly Icon _offIcon = CreateIcon("A", Color.FromArgb(120, 120, 120));
+    private readonly Icon _onIcon = CreateIcon("あ", Theme.Japanese);
+    private readonly Icon _directIcon = CreateIcon("A", Theme.English);
+    private readonly Icon _offIcon = CreateIcon("A", Theme.Paused);
     private readonly ToolStripMenuItem _keyboardModeItem;
     private readonly ToolStripMenuItem _autoSwitchModeItem;
     private readonly ToolStripMenuItem _levelItem;
@@ -64,7 +64,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         });
         _engine.AttachComposition(_composition);
 
-        var menu = new ContextMenuStrip();
+        // メニューは設定画面と同じ色づかいで描く
+        var menu = new ContextMenuStrip { Renderer = Theme.MenuRenderer, Font = Theme.Body, Padding = new Padding(0, 4, 0, 4) };
         _statusItem = new ToolStripMenuItem { Enabled = false };
         _enabledItem = new ToolStripMenuItem("Meltype を有効にする", null, (_, _) => ToggleEnabled()) { CheckOnClick = false };
         _keyboardModeItem = new ToolStripMenuItem("Meltype キーボード (変換ボックスで入力)", null, (_, _) => SetMode(InputMode.Keyboard));
@@ -545,8 +546,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            // 角の丸い四角に文字 (日本語はオレンジ、英字は青、止めているときは灰色)
             using var brush = new SolidBrush(background);
-            g.FillEllipse(brush, 1, 1, 30, 30);
+            using var shape = Theme.RoundRect(new RectangleF(1, 1, 30, 30), 8);
+            g.FillPath(brush, shape);
             using var font = new Font("Yu Gothic UI", 15, FontStyle.Bold, GraphicsUnit.Pixel);
             var size = g.MeasureString(text, font);
             g.DrawString(text, font, Brushes.White, (32 - size.Width) / 2, (32 - size.Height) / 2 + 1);
