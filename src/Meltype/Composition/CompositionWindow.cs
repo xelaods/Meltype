@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Yukishiro
 
 using System.Drawing.Drawing2D;
+using Meltype.UI;
 
 namespace Meltype.Composition;
 
@@ -12,8 +13,12 @@ namespace Meltype.Composition;
 internal sealed class CompositionWindow : Form
 {
     private const int WS_EX_NOACTIVATE = 0x08000000, WS_EX_TOOLWINDOW = 0x00000080, WS_EX_TOPMOST = 0x00000008;
-    private static readonly Color Background = Color.FromArgb(32, 34, 40);
-    private static readonly Color Accent = Color.FromArgb(76, 160, 255);
+    private static readonly Color Background = Theme.Card;
+    private static readonly Color Accent = Theme.Japanese;
+    // 選んでいる候補の行 (濃い地に白い文字)
+    private static readonly Color SelectedRow = Theme.Ink;
+    // 選んでいる文節の地
+    private static readonly Color SelectedClause = Theme.JapaneseSoft;
     private Font _textFont = new("Yu Gothic UI", 13F);
     private Font _candidateFont = new("Yu Gothic UI", 11F);
     private Font _hintFont = new("Yu Gothic UI", 8.5F);
@@ -161,7 +166,7 @@ internal sealed class CompositionWindow : Form
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            BackColor = Color.FromArgb(44, 47, 56);
+            BackColor = Theme.Card;
             DoubleBuffered = true;
         }
 
@@ -188,9 +193,9 @@ internal sealed class CompositionWindow : Form
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            using (var border = new Pen(Color.FromArgb(110, 76, 160, 255))) e.Graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+            using (var border = new Pen(Theme.BorderStrong)) e.Graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
             if (_font is null) return;
-            TextRenderer.DrawText(e.Graphics, _text, _font, new Rectangle(8, 5, Width - 16, Height - 10), Color.FromArgb(225, 225, 225),
+            TextRenderer.DrawText(e.Graphics, _text, _font, new Rectangle(8, 5, Width - 16, Height - 10), Theme.Ink,
                 TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak);
         }
     }
@@ -233,7 +238,7 @@ internal sealed class CompositionWindow : Form
         if (view is null) return;
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        using (var border = new Pen(Accent)) g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+        using (var border = new Pen(Theme.BorderStrong)) g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
 
         var y = 8;
         if (view.Clauses is { Count: > 0 } clauses)
@@ -247,11 +252,11 @@ internal sealed class CompositionWindow : Form
                 var selected = i == view.SelectedClause;
                 if (selected)
                 {
-                    using var highlight = new SolidBrush(Color.FromArgb(90, 76, 160, 255));
+                    using var highlight = new SolidBrush(SelectedClause);
                     g.FillRectangle(highlight, x - 1, y - 1, width + 2, _textFont.Height + 2);
                 }
-                DrawText(g, clauses[i], _textFont, new Point(x, y), Color.White, selected ? Blend(Background, Color.FromArgb(90, 76, 160, 255)) : Background, flags);
-                using (var underline = new Pen(selected ? Accent : Color.FromArgb(170, 170, 170), selected ? 3 : 1))
+                DrawText(g, clauses[i], _textFont, new Point(x, y), Theme.Ink, selected ? SelectedClause : Background, flags);
+                using (var underline = new Pen(selected ? Accent : Theme.Faint, selected ? 3 : 1))
                 {
                     g.DrawLine(underline, x + 1, y + _textFont.Height + 1, x + width - 2, y + _textFont.Height + 1);
                 }
@@ -261,10 +266,10 @@ internal sealed class CompositionWindow : Form
         }
         else
         {
-            DrawText(g, view.Text, _textFont, new Point(10, y), Color.White, Background, TextFormatFlags.NoPrefix);
+            DrawText(g, view.Text, _textFont, new Point(10, y), Theme.Ink, Background, TextFormatFlags.NoPrefix);
             var textWidth = TextRenderer.MeasureText(g, view.Text, _textFont).Width;
             y += _textFont.Height;
-            using (var underline = new Pen(Color.White, 1) { DashStyle = DashStyle.Dot })
+            using (var underline = new Pen(Theme.Ink, 1) { DashStyle = DashStyle.Dot })
             {
                 g.DrawLine(underline, 12, y, 10 + textWidth - 4, y);
             }
@@ -275,9 +280,9 @@ internal sealed class CompositionWindow : Form
         {
             // もしかして: 打った文字のすぐ下に目立つように (Tab で直せる)
             var box = new Rectangle(6, y - 2, Width - 12, SuggestionHeight - 4);
-            using (var fill = new SolidBrush(Color.FromArgb(70, 255, 196, 0))) g.FillRectangle(fill, box);
-            using (var edge = new Pen(Color.FromArgb(255, 196, 0))) g.DrawRectangle(edge, box);
-            TextRenderer.DrawText(g, suggestion, _candidateFont, new Point(12, y + 1), Color.FromArgb(255, 220, 120), TextFormatFlags.NoPrefix);
+            using (var fill = new SolidBrush(Theme.EnglishSoft)) g.FillRectangle(fill, box);
+            using (var edge = new Pen(Theme.English)) g.DrawRectangle(edge, box);
+            TextRenderer.DrawText(g, suggestion, _candidateFont, new Point(12, y + 1), Theme.EnglishText, TextFormatFlags.NoPrefix);
             y += SuggestionHeight;
         }
 
@@ -291,17 +296,18 @@ internal sealed class CompositionWindow : Form
                 var rowHeight = _candidateFont.Height + 4;
                 if (i == view.SelectedIndex)
                 {
-                    using var highlight = new SolidBrush(Color.FromArgb(60, 76, 160, 255));
-                    g.FillRectangle(highlight, 4, y - 2, Width - 8, rowHeight);
+                    using var highlight = new SolidBrush(SelectedRow);
+                    using var path = Theme.RoundRect(new RectangleF(4, y - 2, Width - 8, rowHeight), 5);
+                    g.FillPath(highlight, path);
                 }
                 DrawText(g, $"{i - first + 1}  {view.Candidates[i]}", _candidateFont, new Point(12, y),
-                    i == view.SelectedIndex ? Color.White : Color.FromArgb(200, 200, 200),
-                    i == view.SelectedIndex ? Blend(Background, Color.FromArgb(60, 76, 160, 255)) : Background, TextFormatFlags.NoPrefix);
+                    i == view.SelectedIndex ? Theme.Canvas : Theme.Ink,
+                    i == view.SelectedIndex ? SelectedRow : Background, TextFormatFlags.NoPrefix);
                 if (view.Notes?.ElementAtOrDefault(i) is { } note)
                 {
                     // 英訳の候補: 右端に小さく「英訳」
                     var noteWidth = TextRenderer.MeasureText(g, note, _hintFont).Width;
-                    TextRenderer.DrawText(g, note, _hintFont, new Point(Width - noteWidth - 10, y + (_candidateFont.Height - _hintFont.Height) / 2), Accent, TextFormatFlags.NoPrefix);
+                    TextRenderer.DrawText(g, note, _hintFont, new Point(Width - noteWidth - 10, y + (_candidateFont.Height - _hintFont.Height) / 2), i == view.SelectedIndex ? Theme.Hex(0xE5A47F) : Theme.EnglishText, TextFormatFlags.NoPrefix);
                 }
                 y += rowHeight;
             }
@@ -311,12 +317,12 @@ internal sealed class CompositionWindow : Form
                 y = listTop + PageSize * (_candidateFont.Height + 4);
                 var page = $"{Math.Max(0, view.SelectedIndex) + 1} / {view.Candidates.Count}";
                 var pageWidth = TextRenderer.MeasureText(g, page, _hintFont).Width;
-                TextRenderer.DrawText(g, page, _hintFont, new Point(Width - pageWidth - 10, y + 1), Color.FromArgb(150, 150, 150), TextFormatFlags.NoPrefix);
+                TextRenderer.DrawText(g, page, _hintFont, new Point(Width - pageWidth - 10, y + 1), Theme.Muted, TextFormatFlags.NoPrefix);
                 y += _hintFont.Height + 2;
             }
             y += 6;
         }
-        TextRenderer.DrawText(g, view.Hint, _hintFont, new Point(8, y), Color.FromArgb(150, 150, 150), TextFormatFlags.NoPrefix);
+        TextRenderer.DrawText(g, view.Hint, _hintFont, new Point(8, y), Theme.Muted, TextFormatFlags.NoPrefix);
     }
 
     /// <summary>
@@ -348,12 +354,6 @@ internal sealed class CompositionWindow : Form
         }
         TextRenderer.DrawText(g, text, font, location, fore, flags);
     }
-
-    /// <summary>背景に半透明の色を重ねた後の色。</summary>
-    private static Color Blend(Color back, Color overlay) => Color.FromArgb(
-        back.R + (overlay.R - back.R) * overlay.A / 255,
-        back.G + (overlay.G - back.G) * overlay.A / 255,
-        back.B + (overlay.B - back.B) * overlay.A / 255);
 
     protected override void Dispose(bool disposing)
 

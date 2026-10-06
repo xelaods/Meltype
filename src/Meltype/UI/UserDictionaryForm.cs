@@ -36,41 +36,91 @@ internal sealed class UserDictionaryForm : Form
         _service = service;
         Text = "Meltype ユーザー辞書";
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(560, 520);
-        MinimumSize = new Size(460, 360);
-        Font = new Font("Yu Gothic UI", 9.5F);
+        Size = new Size(600, 620);
+        MinimumSize = new Size(480, 480);
+        Font = Theme.Body;
+        BackColor = Theme.Canvas;
+        ForeColor = Theme.Ink;
+        _reading.BorderStyle = BorderStyle.FixedSingle;
+        _reading.Dock = DockStyle.Fill;
+        _word.FlatStyle = FlatStyle.Flat;
+        _word.Dock = DockStyle.Fill;
+        _readingPreview.ForeColor = Theme.JapaneseText;
+        _readingPreview.BackColor = Theme.Card;
+        _message.ForeColor = Theme.JapaneseText;
+        _message.BackColor = Theme.Card;
 
-        var add = new Button { Text = "登録", AutoSize = true };
+        // 上: 「ことばを登録」のカード。左に読み、右に単語、その下に登録ボタン。
+        var add = new Button { Text = "登録", AutoSize = true, MinimumSize = new Size(96, 34), Anchor = AnchorStyles.Right };
+        Theme.StyleButton(add, primary: true);
         add.Click += (_, _) => Register();
-        var entry = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Padding = new Padding(8) };
-        entry.Controls.Add(new Label { Text = "読み (ローマ字・ひらがな)", AutoSize = true, Padding = new Padding(0, 6, 8, 0) }, 0, 0);
-        entry.Controls.Add(_reading, 1, 0);
-        entry.Controls.Add(_readingPreview, 2, 0);
-        entry.Controls.Add(new Label { Text = "単語 (候補から選ぶか直接入力)", AutoSize = true, Padding = new Padding(0, 6, 8, 0) }, 0, 1);
-        entry.Controls.Add(_word, 1, 1);
-        entry.Controls.Add(add, 2, 1);
-        entry.Controls.Add(_message, 1, 2);
-        entry.SetColumnSpan(_message, 2);
+        var entry = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5, BackColor = Theme.Card, Padding = new Padding(8, 6, 8, 4) };
+        entry.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        entry.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        for (var i = 0; i < 5; i++) entry.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var title = new Label { Text = "ことばを登録", AutoSize = true, Font = Theme.Section, BackColor = Theme.Card, Margin = new Padding(3, 0, 3, 8) };
+        entry.Controls.Add(title, 0, 0);
+        entry.SetColumnSpan(title, 2);
+        entry.Controls.Add(new Label { Text = "読み (ローマ字・ひらがな)", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Small, BackColor = Theme.Card }, 0, 1);
+        entry.Controls.Add(new Label { Text = "ことば (候補から選ぶか直接入力)", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Small, BackColor = Theme.Card }, 1, 1);
+        entry.Controls.Add(_reading, 0, 2);
+        entry.Controls.Add(_word, 1, 2);
+        entry.Controls.Add(_readingPreview, 0, 3);
+        entry.Controls.Add(_message, 1, 3);
+        entry.Controls.Add(add, 1, 4);
+        var entryCard = new CardPanel { Dock = DockStyle.Top, Height = 196, Padding = new Padding(10) };
+        entryCard.Controls.Add(entry);
+        var entryFrame = new Panel { Dock = DockStyle.Top, Height = 196 + 32, Padding = new Padding(16, 16, 16, 16), BackColor = Theme.Canvas };
+        entryFrame.Controls.Add(entryCard);
 
+        // 下: ボタンの帯
         var remove = new Button { Text = "選んだ語を削除", AutoSize = true };
         remove.Click += (_, _) => RemoveSelected();
-        var close = new Button { Text = "閉じる", AutoSize = true, DialogResult = DialogResult.Cancel };
+        var close = new Button { Text = "閉じる", AutoSize = true, MinimumSize = new Size(96, 34), DialogResult = DialogResult.Cancel };
         close.Click += (_, _) => Close();
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6) };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(12, 10, 12, 10), BackColor = Theme.Footer };
+        buttons.Paint += (_, e) =>
+        {
+            using var line = new Pen(Theme.Border);
+            e.Graphics.DrawLine(line, 0, 0, buttons.Width, 0);
+        };
         // ほかの日本語入力 (Microsoft IME・Google 日本語入力) の辞書の取り込みと、Microsoft IME の形式での書き出し
         var import = new Button { Text = "取り込む...", AutoSize = true };
         import.Click += (_, _) => Import();
         var export = new Button { Text = "書き出す...", AutoSize = true };
         export.Click += (_, _) => Export();
+        foreach (var button in new[] { remove, import, export }) Theme.StyleButton(button);
+        Theme.StyleButton(close, primary: true);
         buttons.Controls.AddRange([close, remove, export, import]);
 
+        // 真ん中: 登録済みの一覧
         _grid.Columns.Add("reading", "読み");
-        _grid.Columns.Add("word", "単語");
-        var gridPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8, 0, 8, 0) };
-        gridPanel.Controls.Add(_grid);
+        _grid.Columns.Add("word", "ことば");
+        _grid.BackgroundColor = Theme.Card;
+        _grid.BorderStyle = BorderStyle.None;
+        _grid.GridColor = Theme.Divider;
+        _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        _grid.EnableHeadersVisualStyles = false;
+        _grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+        _grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.Card;
+        _grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
+        _grid.ColumnHeadersDefaultCellStyle.Font = Theme.Small;
+        _grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.Card;
+        _grid.ColumnHeadersHeight = 30;
+        _grid.DefaultCellStyle.Font = Theme.Body;
+        _grid.DefaultCellStyle.ForeColor = Theme.Ink;
+        _grid.DefaultCellStyle.SelectionBackColor = Theme.JapaneseSoft;
+        _grid.DefaultCellStyle.SelectionForeColor = Theme.Ink;
+        _grid.RowTemplate.Height = 32;
+        var listTitle = new Label { Text = "登録済み", Dock = DockStyle.Top, Height = 30, Font = Theme.BodyBold, BackColor = Theme.Canvas, Padding = new Padding(2, 4, 0, 0) };
+        var listCard = new CardPanel { Dock = DockStyle.Fill, Padding = new Padding(8) };
+        listCard.Controls.Add(_grid);
+        var gridPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16, 0, 16, 16), BackColor = Theme.Canvas };
+        gridPanel.Controls.Add(listCard);
+        gridPanel.Controls.Add(listTitle);
 
         Controls.Add(gridPanel);
-        Controls.Add(entry);
+        Controls.Add(entryFrame);
         Controls.Add(buttons);
         AcceptButton = add;
         CancelButton = close;

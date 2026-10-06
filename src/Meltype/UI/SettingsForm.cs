@@ -8,10 +8,11 @@ using Meltype.Config;
 namespace Meltype.UI;
 
 /// <summary>
-/// 設定画面。Settings の各項目を種類に合わせた部品で並べる:
-///   ON/OFF → プルダウン、選択肢 (列挙型) → 日本語名のプルダウン、数値 → 数値入力、アプリ別設定 → 表 (ON/OFF はプルダウン)。
+/// 設定画面。左に プロファイル と 分類の一覧、右に 分類ごとのカードを縦に並べる。
+/// 各項目は 名前・説明・部品 の 1 行で、部品は種類に合わせる:
+///   ON/OFF → スイッチ、選択肢が少ない列挙型 → 横並びの選択、多い列挙型 → プルダウン、数値 → 数値入力、表 → 説明の下に幅いっぱい。
 /// 項目名・分類・説明は Settings の属性 (DisplayName / Category / Description) から取る。
-/// 下の「判定テスト」欄では、打った英字が IME 自動切替でどう判定されるかと理由を確認できる。
+/// いちばん下の「判定テスト」では、打った英字が IME 自動切替でどう判定されるかと理由を確認できる。
 /// </summary>
 internal sealed class SettingsForm : Form
 {
@@ -20,17 +21,17 @@ internal sealed class SettingsForm : Form
 
     private readonly MeltypeEngine _engine;
     private readonly List<Binding> _bindings = [];
-    private readonly Label _help = new() { Dock = DockStyle.Fill, ForeColor = SystemColors.GrayText, Padding = new Padding(8, 4, 8, 4) };
-    // 説明の欄。長い説明でも見切れないよう、説明の長さに合わせて高さを変える
-    private readonly Panel _helpPanel = new() { Dock = DockStyle.Bottom, Height = HelpMinHeight, BorderStyle = BorderStyle.FixedSingle };
-    private const int HelpMinHeight = 46;
-    private const int HelpMaxHeight = 150;
-    private readonly TextBox _testInput = new() { Dock = DockStyle.Top, ImeMode = ImeMode.Disable };
-    private readonly TextBox _testResult = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox _testInput = new() { Dock = DockStyle.Top, ImeMode = ImeMode.Disable, BorderStyle = BorderStyle.FixedSingle, Font = Theme.Mono, BackColor = Theme.Canvas };
+    private readonly TextBox _testResult = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None, Font = Theme.Mono, BackColor = Theme.Card, ForeColor = Theme.Ink };
     private readonly ToolTip _toolTip = new() { AutoPopDelay = 20000 };
     // プロファイル (仕事用・趣味用・SNS 用など) を選ぶ欄
-    private readonly ComboBox _profiles = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200, Anchor = AnchorStyles.Left };
+    private readonly ComboBox _profiles = new() { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = Theme.Body };
     private bool _loadingProfiles;
+
+    // 右側: 分類ごとの見出しとカード。大きさは LayoutBody で決める。
+    private readonly Panel _body = new() { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Canvas };
+    private readonly List<(Label Header, CardPanel Card, List<SettingRow> Rows, Button Nav)> _sections = [];
+    private Button? _activeNav;
 
     /// <summary>画面の部品に出していない値 (プロファイルの一覧・使っているプロファイル など) を持つ設定。</summary>
     private Settings _draft;
@@ -42,46 +43,25 @@ internal sealed class SettingsForm : Form
     {
         _engine = engine;
         _draft = engine.Settings.Clone().Normalize();
-        Text = "Meltype 設定";
+        Text = "Meltype の設定";
         StartPosition = FormStartPosition.CenterScreen;
-        // 画面に収まる高さにする (中身はスクロールできる)。
+        // 画面に収まる大きさにする (中身はスクロールできる)。
         var area = Screen.FromPoint(Cursor.Position).WorkingArea;
-        Size = new Size(Math.Min(640, area.Width - 40), Math.Min(640, area.Height - 60));
-        MinimumSize = new Size(480, 400);
-        Font = new Font("Yu Gothic UI", 9.5F);
+        Size = new Size(Math.Min(980, area.Width - 40), Math.Min(760, area.Height - 60));
+        MinimumSize = new Size(640, 460);
+        Font = Theme.Body;
+        BackColor = Theme.Canvas;
+        ForeColor = Theme.Ink;
 
-        // 1 列の表に分類ごとの枠を縦に並べる (どの枠も画面の幅いっぱいにそろう)。
-        var body = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            AutoScroll = true,
-            Padding = new Padding(8, 8, SystemInformation.VerticalScrollBarWidth + 4, 8),
-        };
-        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foreach (var group in BuildGroups())
-        {
-            group.Dock = DockStyle.Fill;
-            body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            body.Controls.Add(group);
-        }
-        // 自動スクロールの表は、最後の行の下の余白を含めないことがあり、一番下の枠が少し見切れる。空の行で余白を取る
-        body.RowStyles.Add(new RowStyle(SizeType.Absolute, 16));
-        body.Controls.Add(new Panel { Height = 16, Margin = Padding.Empty });
+        var sidebar = BuildSidebar();
+        BuildSections(sidebar.Nav);
 
-        _helpPanel.Controls.Add(_help);
-        _helpPanel.Resize += (_, _) => FitHelp();
-
-        var testLabel = new Label { Text = "判定テスト (IME 自動切替の判定。英字で入力):", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 6, 0, 2) };
-        _testInput.TextChanged += (_, _) => RunTest();
-        var testPanel = new Panel { Dock = DockStyle.Bottom, Height = 110, Padding = new Padding(8, 0, 8, 0) };
-        testPanel.Controls.Add(_testResult);
-        testPanel.Controls.Add(_testInput);
-        testPanel.Controls.Add(testLabel);
-
-        var ok = new Button { Text = "OK", Width = 90 };
-        var cancel = new Button { Text = "キャンセル", Width = 90, DialogResult = DialogResult.Cancel };
-        var defaults = new Button { Text = "既定値に戻す", Width = 110 };
+        var ok = new Button { Text = "OK", AutoSize = true, MinimumSize = new Size(96, 34) };
+        var cancel = new Button { Text = "キャンセル", AutoSize = true, MinimumSize = new Size(96, 34), DialogResult = DialogResult.Cancel };
+        var defaults = new Button { Text = "既定値に戻す", AutoSize = true, MinimumSize = new Size(110, 34) };
+        Theme.StyleButton(ok, primary: true);
+        Theme.StyleButton(cancel);
+        Theme.StyleButton(defaults);
         // OK と × (閉じる) は保存する。変更を捨てるのは キャンセル だけ。
         var discard = false;
         ok.Click += (_, _) => Close();
@@ -101,32 +81,60 @@ internal sealed class SettingsForm : Form
             LoadFrom(new Settings());
             RunTest();
         };
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 42, Padding = new Padding(6) };
-        buttons.Controls.AddRange([cancel, ok, defaults]);
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 56, BackColor = Theme.Footer, Padding = new Padding(16, 10, 16, 10) };
+        footer.Paint += (_, e) =>
+        {
+            using var line = new Pen(Theme.Border);
+            e.Graphics.DrawLine(line, 0, 0, footer.Width, 0);
+        };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Right, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, WrapContents = false, BackColor = Theme.Footer };
+        buttons.Controls.AddRange([ok, cancel, defaults]);
+        var note = new Label { Text = "× で閉じても保存されます", AutoSize = true, Dock = DockStyle.Left, ForeColor = Theme.Muted, Font = Theme.Small, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(0, 9, 0, 0) };
+        footer.Controls.Add(buttons);
+        footer.Controls.Add(note);
 
-        Controls.Add(body);
-        Controls.Add(BuildProfileBar());
-        Controls.Add(_helpPanel);
-        Controls.Add(testPanel);
-        Controls.Add(buttons);
+        Controls.Add(_body);
+        Controls.Add(sidebar.Panel);
+        Controls.Add(footer);
         AcceptButton = ok;
         CancelButton = cancel;
 
+        _body.Resize += (_, _) => LayoutBody();
         LoadFrom(_draft);
         RefreshProfiles();
+        LayoutBody();
     }
 
-    /// <summary>上のプロファイルの欄: 選ぶと、そのプロファイルの値を画面に読み込む。新規は今の値を写して作る。</summary>
-    private Control BuildProfileBar()
+    /// <summary>左側: プロファイルの欄と、分類へ飛ぶボタン。</summary>
+    private (Panel Panel, FlowLayoutPanel Nav) BuildSidebar()
     {
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(8, 8, 8, 0) };
-        var label = new Label { Text = "プロファイル:", AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 0, 0) };
-        var add = new Button { Text = "新規...", AutoSize = true };
-        var rename = new Button { Text = "名前を変更...", AutoSize = true };
-        var remove = new Button { Text = "削除", AutoSize = true };
-        var export = new Button { Text = "書き出す...", AutoSize = true };
-        var import = new Button { Text = "読み込む...", AutoSize = true };
-        ShowHelpFor(_profiles, "プロファイル", "仕事用・趣味用・SNS 用など、設定の値をまとめて切り替えられます。トレイのメニューの「プロファイル」からも切り替えられます。Meltype の ON/OFF・ログ・更新の設定は、どのプロファイルでも共通です。「書き出す...」でファイルにして、ほかの人に渡せます (「読み込む...」で新しいプロファイルとして足せます)。");
+        var panel = new Panel { Dock = DockStyle.Left, Width = 220, BackColor = Theme.Sidebar, Padding = new Padding(14, 18, 14, 14) };
+        panel.Paint += (_, e) =>
+        {
+            using var line = new Pen(Theme.Border);
+            e.Graphics.DrawLine(line, panel.Width - 1, 0, panel.Width - 1, panel.Height);
+        };
+        var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.Sidebar, Padding = new Padding(0, 14, 0, 0) };
+        nav.Resize += (_, _) =>
+        {
+            foreach (Control c in nav.Controls) c.Width = nav.ClientSize.Width - 2;
+        };
+
+        var label = new Label { Text = "プロファイル", Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Muted, Font = Theme.Small, BackColor = Theme.Sidebar };
+        var row = new TableLayoutPanel { Dock = DockStyle.Top, Height = 34, ColumnCount = 2, BackColor = Theme.Sidebar, Margin = Padding.Empty };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
+        _profiles.Dock = DockStyle.Fill;
+        _profiles.Margin = new Padding(0, 2, 4, 0);
+        var more = new Button { Text = "…", Dock = DockStyle.Fill, Margin = new Padding(0, 1, 0, 0), AccessibleName = "プロファイルの操作" };
+        Theme.StyleButton(more);
+        more.MinimumSize = Size.Empty;
+        more.Padding = Padding.Empty;
+        row.Controls.Add(_profiles, 0, 0);
+        row.Controls.Add(more, 1, 0);
+        more.Click += (_, _) => BuildProfileMenu().Show(more, new Point(0, more.Height));
+        ShowHelpFor(_profiles, "プロファイル", "仕事用・趣味用・SNS 用など、設定の値をまとめて切り替えられます。トレイのメニューの「プロファイル」からも切り替えられます。Meltype の ON/OFF・ログ・更新の設定は、どのプロファイルでも共通です。「…」の「書き出す...」でファイルにして、ほかの人に渡せます (「読み込む...」で新しいプロファイルとして足せます)。");
+        ShowHelpFor(more, "プロファイルの操作", "新規・名前を変更・削除・書き出す・読み込む");
         _profiles.SelectedIndexChanged += (_, _) =>
         {
             if (_loadingProfiles || _profiles.SelectedItem is not string name || name == _draft.ActiveProfile) return;
@@ -135,93 +143,118 @@ internal sealed class SettingsForm : Form
             LoadFrom(_draft);
             RunTest();
         };
-        add.Click += (_, _) =>
+
+        var version = new Label { Text = $"Meltype {AppInfo.Version}", Dock = DockStyle.Bottom, Height = 22, ForeColor = Theme.Muted, Font = Theme.Small, BackColor = Theme.Sidebar };
+
+        panel.Controls.Add(nav);
+        panel.Controls.Add(version);
+        panel.Controls.Add(row);
+        panel.Controls.Add(label);
+        return (panel, nav);
+    }
+
+    /// <summary>「…」のメニュー: プロファイルの 新規・名前を変更・削除・書き出す・読み込む。</summary>
+    private ContextMenuStrip BuildProfileMenu()
+    {
+        var menu = new ContextMenuStrip { Renderer = Theme.MenuRenderer, Font = Theme.Body };
+        menu.Items.Add("新規...", null, (_, _) => AddProfile());
+        menu.Items.Add("名前を変更...", null, (_, _) => RenameProfile());
+        menu.Items.Add("削除", null, (_, _) => RemoveProfile());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("書き出す...", null, (_, _) => ExportProfile());
+        menu.Items.Add("読み込む...", null, (_, _) => ImportProfile());
+        menu.Closed += (_, _) => BeginInvoke(new Action(menu.Dispose));
+        return menu;
+    }
+
+    private void AddProfile()
+    {
+        if (TextPrompt.Ask(this, "新しいプロファイル", "名前 (例: 仕事用、趣味用、SNS 用)。今の設定を写して作ります。", "") is not { } name) return;
+        if (Collect().AddProfile(name) is not { } next)
         {
-            if (TextPrompt.Ask(this, "新しいプロファイル", "名前 (例: 仕事用、趣味用、SNS 用)。今の設定を写して作ります。", "") is not { } name) return;
-            if (Collect().AddProfile(name) is not { } next)
-            {
-                MessageBox.Show(this, "名前が空か、同じ名前のプロファイルがあります。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            _draft = next;
-            RefreshProfiles();
-        };
-        rename.Click += (_, _) =>
+            MessageBox.Show(this, "名前が空か、同じ名前のプロファイルがあります。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        _draft = next;
+        RefreshProfiles();
+    }
+
+    private void RenameProfile()
+    {
+        var old = _draft.ActiveProfile;
+        if (TextPrompt.Ask(this, "プロファイルの名前を変更", "新しい名前:", old) is not { } name || name == old) return;
+        if (Collect().RenameProfile(old, name) is not { } next)
         {
-            var old = _draft.ActiveProfile;
-            if (TextPrompt.Ask(this, "プロファイルの名前を変更", "新しい名前:", old) is not { } name || name == old) return;
-            if (Collect().RenameProfile(old, name) is not { } next)
-            {
-                MessageBox.Show(this, "名前が空か、同じ名前のプロファイルがあります。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            _draft = next;
-            RefreshProfiles();
-        };
-        remove.Click += (_, _) =>
+            MessageBox.Show(this, "名前が空か、同じ名前のプロファイルがあります。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        _draft = next;
+        RefreshProfiles();
+    }
+
+    private void RemoveProfile()
+    {
+        var name = _draft.ActiveProfile;
+        if (_draft.Profiles.Count <= 1)
         {
-            var name = _draft.ActiveProfile;
-            if (_draft.Profiles.Count <= 1)
-            {
-                MessageBox.Show(this, "プロファイルが 1 つだけのときは削除できません。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            if (MessageBox.Show(this, $"プロファイル「{name}」を削除しますか?", "プロファイル", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            _draft = Collect().RemoveProfile(name) ?? _draft;
-            LoadFrom(_draft);
-            RefreshProfiles();
-            RunTest();
-        };
-        // プロファイルを人に渡す: 書き出したファイルを、相手が「読み込む...」で新しいプロファイルとして足す
-        export.Click += (_, _) =>
+            MessageBox.Show(this, "プロファイルが 1 つだけのときは削除できません。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (MessageBox.Show(this, $"プロファイル「{name}」を削除しますか?", "プロファイル", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        _draft = Collect().RemoveProfile(name) ?? _draft;
+        LoadFrom(_draft);
+        RefreshProfiles();
+        RunTest();
+    }
+
+    // プロファイルを人に渡す: 書き出したファイルを、相手が「読み込む...」で新しいプロファイルとして足す
+    private void ExportProfile()
+    {
+        var draft = Collect();
+        using var dialog = new SaveFileDialog
         {
-            var draft = Collect();
-            using var dialog = new SaveFileDialog
-            {
-                Title = "プロファイルを書き出す",
-                Filter = "Meltype のプロファイル (*.meltype-profile.json)|*.meltype-profile.json|すべてのファイル (*.*)|*.*",
-                FileName = $"{string.Concat(draft.ActiveProfile.Split(Path.GetInvalidFileNameChars()))}.meltype-profile.json",
-            };
-            if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            try
-            {
-                File.WriteAllText(dialog.FileName, draft.ExportProfile());
-                MessageBox.Show(this, $"プロファイル「{draft.ActiveProfile}」を書き出しました。\nアプリ別設定 (アプリのプロセス名) も入っています。渡す前に、見られてもよいか確かめてください。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, $"書き出せませんでした: {ex.Message}", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            Title = "プロファイルを書き出す",
+            Filter = "Meltype のプロファイル (*.meltype-profile.json)|*.meltype-profile.json|すべてのファイル (*.*)|*.*",
+            FileName = $"{string.Concat(draft.ActiveProfile.Split(Path.GetInvalidFileNameChars()))}.meltype-profile.json",
         };
-        import.Click += (_, _) =>
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
         {
-            using var dialog = new OpenFileDialog
-            {
-                Title = "プロファイルを読み込む",
-                Filter = "Meltype のプロファイル (*.meltype-profile.json)|*.meltype-profile.json|JSON (*.json)|*.json|すべてのファイル (*.*)|*.*",
-            };
-            if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            Settings? next = null;
-            try
-            {
-                // プロファイルは数 KB。大きすぎるファイルは読まない
-                if (new FileInfo(dialog.FileName).Length <= 1024 * 1024) next = Collect().ImportProfile(File.ReadAllText(dialog.FileName));
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-            }
-            if (next is null)
-            {
-                MessageBox.Show(this, "Meltype のプロファイルとして読めませんでした。「書き出す...」で作ったファイルを選んでください。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            _draft = next;
-            LoadFrom(_draft);
-            RefreshProfiles();
-            RunTest();
+            File.WriteAllText(dialog.FileName, draft.ExportProfile());
+            MessageBox.Show(this, $"プロファイル「{draft.ActiveProfile}」を書き出しました。\nアプリ別設定 (アプリのプロセス名) も入っています。渡す前に、見られてもよいか確かめてください。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"書き出せませんでした: {ex.Message}", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void ImportProfile()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "プロファイルを読み込む",
+            Filter = "Meltype のプロファイル (*.meltype-profile.json)|*.meltype-profile.json|JSON (*.json)|*.json|すべてのファイル (*.*)|*.*",
         };
-        bar.Controls.AddRange([label, _profiles, add, rename, remove, export, import]);
-        return bar;
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        Settings? next = null;
+        try
+        {
+            // プロファイルは数 KB。大きすぎるファイルは読まない
+            if (new FileInfo(dialog.FileName).Length <= 1024 * 1024) next = Collect().ImportProfile(File.ReadAllText(dialog.FileName));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+        if (next is null)
+        {
+            MessageBox.Show(this, "Meltype のプロファイルとして読めませんでした。「書き出す...」で作ったファイルを選んでください。", "プロファイル", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        _draft = next;
+        LoadFrom(_draft);
+        RefreshProfiles();
+        RunTest();
     }
 
     /// <summary>プロファイルの一覧を出し直して、使っているものを選ぶ。</summary>
@@ -234,46 +267,108 @@ internal sealed class SettingsForm : Form
         _loadingProfiles = false;
     }
 
-    /// <summary>分類 (Category) ごとの枠に、項目を 1 行ずつ並べる。</summary>
-    private IEnumerable<GroupBox> BuildGroups()
+    /// <summary>分類 (Category) ごとに 見出し + カード を作り、左の一覧にその分類へ飛ぶボタンを足す。最後に「判定テスト」。</summary>
+    private void BuildSections(FlowLayoutPanel nav)
     {
-        var properties = typeof(Settings).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        var categories = typeof(Settings).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite && p.GetCustomAttribute<BrowsableAttribute>()?.Browsable != false)
             .GroupBy(p => p.GetCustomAttribute<CategoryAttribute>()?.Category ?? "その他")
             .OrderBy(g => g.Key, StringComparer.Ordinal);
-        foreach (var category in properties)
+        foreach (var category in categories)
         {
-            var table = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(4) };
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            var rows = new List<SettingRow>();
             foreach (var property in category)
             {
                 if (CreateBinding(property) is not { } binding) continue;
                 var name = property.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName ?? property.Name;
                 var description = property.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "";
-                var label = new Label { Text = name, AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 0, 6) };
-                // 表 (アプリ別設定は表 + ボタンの枠) は、右の列だと狭くて列が見切れるので、名前の下に幅いっぱいで出す
-                var fullRow = binding.Control is DataGridView or Panel;
-                if (fullRow)
-                {
-                    table.Controls.Add(label);
-                    table.SetColumnSpan(label, 2);
-                    table.Controls.Add(binding.Control);
-                    table.SetColumnSpan(binding.Control, 2);
-                }
-                else
-                {
-                    table.Controls.Add(label);
-                    table.Controls.Add(binding.Control);
-                }
-                ShowHelpFor(label, name, description);
+                // 表 (アプリ別設定は表 + ボタンの枠) は、右に置くと狭いので、説明の下に幅いっぱいで出す
+                var row = new SettingRow(name, description, binding.Control, fullWidth: binding.Control is DataGridView or Panel);
                 ShowHelpFor(binding.Control, name, description);
+                rows.Add(row);
                 _bindings.Add(binding);
             }
-            var group = new GroupBox { Text = StripNumber(category.Key), AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6) };
-            group.Controls.Add(table);
-            yield return group;
+            if (rows.Count > 0) AddSection(nav, StripNumber(category.Key), rows);
         }
+
+        var testLabel = new Label { Text = "英字で入力 (例: kyouha meeting)", Dock = DockStyle.Top, Height = 22, ForeColor = Theme.Muted, Font = Theme.Small, BackColor = Theme.Card };
+        _testInput.TextChanged += (_, _) => RunTest();
+        var resultFrame = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0), BackColor = Theme.Card };
+        resultFrame.Controls.Add(_testResult);
+        var testPanel = new Panel { Height = 170, BackColor = Theme.Card };
+        testPanel.Controls.Add(resultFrame);
+        testPanel.Controls.Add(_testInput);
+        testPanel.Controls.Add(testLabel);
+        AddSection(nav, "判定テスト",
+            [new SettingRow("IME 自動切替の判定", "打った英字が日本語と英語のどちらと判定されるか、その理由と点数を確かめられます。", testPanel, fullWidth: true)]);
+    }
+
+    private void AddSection(FlowLayoutPanel nav, string title, List<SettingRow> rows)
+    {
+        var header = new Label { Text = title, AutoSize = true, Font = Theme.Section, ForeColor = Theme.Ink, BackColor = Theme.Canvas };
+        var card = new CardPanel();
+        for (var i = 0; i < rows.Count; i++)
+        {
+            rows[i].Last = i == rows.Count - 1;
+            card.Controls.Add(rows[i]);
+        }
+        _body.Controls.Add(header);
+        _body.Controls.Add(card);
+
+        var button = new Button { Text = title, Width = Math.Max(120, nav.ClientSize.Width - 2), Margin = new Padding(0, 0, 0, 2) };
+        Theme.StyleNavButton(button);
+        button.Click += (_, _) =>
+        {
+            SelectNav(button);
+            // 見出しが上に来るまでスクロールする
+            _body.AutoScrollPosition = new Point(0, header.Top - _body.AutoScrollPosition.Y - 20);
+        };
+        nav.Controls.Add(button);
+        _sections.Add((header, card, rows, button));
+        if (_activeNav is null) SelectNav(button);
+    }
+
+    private void SelectNav(Button button)
+    {
+        if (_activeNav is { } previous)
+        {
+            previous.BackColor = Theme.Sidebar;
+            previous.Font = Theme.Body;
+            previous.ForeColor = Theme.Hex(0x3F4047);
+        }
+        _activeNav = button;
+        button.BackColor = Theme.Card;
+        button.Font = Theme.BodyBold;
+        button.ForeColor = Theme.Ink;
+    }
+
+    /// <summary>右側の見出しとカードを、今の幅に合わせて上から並べ直す。</summary>
+    private void LayoutBody()
+    {
+        if (_sections.Count == 0) return;
+        _body.SuspendLayout();
+        var scale = DeviceDpi / 96F;
+        var pad = (int)(28 * scale);
+        var width = Math.Max(320, Math.Min(_body.ClientSize.Width - pad * 2, (int)(860 * scale)));
+        var origin = _body.AutoScrollPosition;
+        var y = pad;
+        foreach (var (header, card, rows, _) in _sections)
+        {
+            header.Location = new Point(pad + origin.X, y + origin.Y);
+            y += header.PreferredHeight + (int)(10 * scale);
+            var rowY = 1;
+            foreach (var row in rows)
+            {
+                var h = row.Arrange(width - 2);
+                row.SetBounds(1, rowY, width - 2, h);
+                rowY += h;
+            }
+            card.SetBounds(pad + origin.X, y + origin.Y, width, rowY + 1);
+            y += rowY + 1 + (int)(32 * scale);
+        }
+        // いちばん下まで見えるように、余白の分だけスクロールできる範囲を足す
+        _body.AutoScrollMinSize = new Size(0, y + pad);
+        _body.ResumeLayout();
     }
 
     /// <summary>項目の種類に合わせた部品を作る。</summary>
@@ -282,22 +377,38 @@ internal sealed class SettingsForm : Form
         var type = property.PropertyType;
         if (type == typeof(bool))
         {
-            var combo = DropDown([On, Off]);
-            return new Binding(property, combo,
-                s => combo.SelectedItem = (bool)property.GetValue(s)! ? On : Off,
-                s => property.SetValue(s, Equals(combo.SelectedItem, On)));
+            var toggle = new ToggleSwitch();
+            toggle.CheckedChanged += (_, _) => RunTest();
+            return new Binding(property, toggle,
+                s => toggle.Checked = (bool)property.GetValue(s)!,
+                s => property.SetValue(s, toggle.Checked));
         }
         if (type.IsEnum)
         {
             var values = Enum.GetValues(type).Cast<object>().ToList();
-            var combo = DropDown(values.Select(v => EnumName(type, v)).ToArray());
+            var names = values.Select(v => EnumName(type, v)).ToArray();
+            // 選択肢が少なく名前が短いときは横に並べる (どれを選べるかが一目で分かる)。多いときや長いときはプルダウン。
+            var shortNames = names.Select(ShortName).ToArray();
+            if (values.Count <= 4 && shortNames.All(n => n.Length <= 10))
+            {
+                var segments = new SegmentedControl(shortNames);
+                segments.SelectedIndexChanged += (_, _) => RunTest();
+                for (var i = 0; i < names.Length; i++)
+                {
+                    if (names[i] != shortNames[i]) _toolTip.SetToolTip(segments, string.Join(" / ", names));
+                }
+                return new Binding(property, segments,
+                    s => segments.SelectedIndex = values.IndexOf(property.GetValue(s)!),
+                    s => property.SetValue(s, values[Math.Max(0, segments.SelectedIndex)]));
+            }
+            var combo = DropDown(names);
             return new Binding(property, combo,
                 s => combo.SelectedIndex = values.IndexOf(property.GetValue(s)!),
                 s => property.SetValue(s, values[Math.Max(0, combo.SelectedIndex)]));
         }
         if (type == typeof(int))
         {
-            var number = new NumericUpDown { Minimum = 0, Maximum = 60000, Width = 120, Anchor = AnchorStyles.Left };
+            var number = new NumericUpDown { Minimum = 0, Maximum = 60000, Width = 120, BorderStyle = BorderStyle.FixedSingle, Font = Theme.Body, TextAlign = HorizontalAlignment.Right };
             return new Binding(property, number,
                 s => number.Value = Math.Clamp((int)property.GetValue(s)!, (int)number.Minimum, (int)number.Maximum),
                 s => property.SetValue(s, (int)number.Value));
@@ -305,18 +416,21 @@ internal sealed class SettingsForm : Form
         if (type == typeof(List<AppRule>))
         {
             var grid = _rulesGrid = AppRulesGrid();
+            StyleGrid(grid);
             // プロセス名 (maya.exe など) を知らなくても足せるように、実行中のアプリから選べるようにする。
             var add = new Button { Text = "実行中のアプリから追加…", AutoSize = true };
+            Theme.StyleButton(add);
             add.Click += (_, _) => ShowRunningApps(grid, add);
             // 行の削除は Delete キーでもできるが、気づきにくいのでボタンも置く
             var remove = new Button { Text = "選んだ行を削除", AutoSize = true };
+            Theme.StyleButton(remove);
             remove.Click += (_, _) =>
             {
                 foreach (var row in grid.SelectedCells.Cast<DataGridViewCell>().Select(c => c.OwningRow).Distinct().Where(r => !r.IsNewRow).ToList()) grid.Rows.Remove(row);
             };
-            var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+            var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 8, 0, 0), BackColor = Theme.Card };
             actions.Controls.AddRange([add, remove]);
-            var panel = new Panel { Height = grid.Height + add.PreferredSize.Height + 10, Dock = DockStyle.Fill };
+            var panel = new Panel { Height = grid.Height + add.PreferredSize.Height + 16, BackColor = Theme.Card };
             panel.Controls.Add(grid);
             panel.Controls.Add(actions);
             return new Binding(property, panel,
@@ -350,6 +464,7 @@ internal sealed class SettingsForm : Form
         if (type == typeof(List<AppKind>))
         {
             var grid = AppKindsGrid();
+            StyleGrid(grid);
             return new Binding(property, grid,
                 s =>
                 {
@@ -365,6 +480,36 @@ internal sealed class SettingsForm : Form
                 s => property.SetValue(s, ReadKinds(grid)));
         }
         return null;
+    }
+
+    /// <summary>"積極的 (Aggressive)" → "積極的"。括弧の中が英字だけのときは、横並びの選択では省く。</summary>
+    private static string ShortName(string name)
+    {
+        var open = name.LastIndexOf(" (", StringComparison.Ordinal);
+        if (open <= 0 || !name.EndsWith(')')) return name;
+        var inner = name[(open + 2)..^1];
+        return inner.All(c => char.IsAsciiLetter(c) || c == ' ') ? name[..open] : name;
+    }
+
+    /// <summary>表をカードになじむ見た目にする。</summary>
+    private static void StyleGrid(DataGridView grid)
+    {
+        grid.BackgroundColor = Theme.Card;
+        grid.BorderStyle = BorderStyle.FixedSingle;
+        grid.GridColor = Theme.Divider;
+        grid.EnableHeadersVisualStyles = false;
+        grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.Footer;
+        grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
+        grid.ColumnHeadersDefaultCellStyle.Font = Theme.Small;
+        grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.Footer;
+        grid.ColumnHeadersHeight = 32;
+        grid.RowHeadersDefaultCellStyle.BackColor = Theme.Footer;
+        grid.DefaultCellStyle.Font = Theme.Body;
+        grid.DefaultCellStyle.ForeColor = Theme.Ink;
+        grid.DefaultCellStyle.SelectionBackColor = Theme.JapaneseSoft;
+        grid.DefaultCellStyle.SelectionForeColor = Theme.Ink;
+        grid.RowTemplate.Height = 32;
     }
 
     private const string SameAsGlobal = "全体と同じ";
@@ -438,7 +583,7 @@ internal sealed class SettingsForm : Form
 
     private ComboBox DropDown(string[] items)
     {
-        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 250, Anchor = AnchorStyles.Left };
+        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Width = 260, Font = Theme.Body };
         combo.Items.AddRange(items);
         combo.SelectedIndexChanged += (_, _) => RunTest();
         return combo;
@@ -519,25 +664,12 @@ internal sealed class SettingsForm : Form
         return dot >= 0 && category[..dot].All(char.IsAsciiDigit) ? category[(dot + 2)..] : category;
     }
 
+    /// <summary>説明は行の中に出しているので、ここでは部品にツールチップを付けるだけ (長い説明でも全文を読める)。</summary>
     private void ShowHelpFor(Control control, string name, string description)
     {
-        if (description.Length > 0) _toolTip.SetToolTip(control, description);
-        void Show(object? sender, EventArgs e)
-        {
-            _help.Text = description.Length > 0 ? $"{name}: {description}" : name;
-            FitHelp();
-        }
-        control.Enter += Show;
-        control.MouseEnter += Show;
-    }
-
-    /// <summary>説明の欄の高さを、説明が全部見える高さにする (上限を超える分はツールチップで見られる)。</summary>
-    private void FitHelp()
-    {
-        var width = Math.Max(100, _helpPanel.ClientSize.Width - _help.Padding.Horizontal);
-        var size = TextRenderer.MeasureText(_help.Text, _help.Font, new Size(width, int.MaxValue), TextFormatFlags.WordBreak);
-        var height = Math.Clamp(size.Height + _help.Padding.Vertical + 6, HelpMinHeight, HelpMaxHeight);
-        if (_helpPanel.Height != height) _helpPanel.Height = height;
+        _toolTip.SetToolTip(control, description.Length > 0 ? $"{name}: {description}" : name);
+        if (control.AccessibleName is null) control.AccessibleName = name;
+        if (description.Length > 0) control.AccessibleDescription = description;
     }
 
     private void LoadFrom(Settings settings)
@@ -574,7 +706,11 @@ internal sealed class SettingsForm : Form
                 var result = _engine.Evaluate(letters[..i], settings);
                 if (result.Verdict != Detection.Verdict.Undecided || i == letters.Length)
                 {
-                    var verdict = result.Verdict == Detection.Verdict.Undecided ? "Unknown (Space で確定)" : result.Verdict.ToString();
+                    var verdict = result.Verdict switch
+                    {
+                        Detection.Verdict.Undecided => "どちらとも言えない (Space で確定)",
+                        _ => result.Verdict.ToString(),
+                    };
                     lines.Add($"{word}: {verdict} — \"{letters[..i]}\" の時点, JP={result.JapaneseScore} EN={result.EnglishScore}\r\n    " +
                               string.Join("\r\n    ", result.Contributions.Select(c => c.ToString())));
                     break;
@@ -588,5 +724,76 @@ internal sealed class SettingsForm : Form
     {
         if (disposing) _toolTip.Dispose();
         base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// 設定の 1 行: 左に 名前 と 説明、右に部品。fullWidth の部品 (表など) は説明の下に幅いっぱいで置く。
+    /// 高さは Arrange で、説明の折り返しに合わせて決める。
+    /// </summary>
+    private sealed class SettingRow : Panel
+    {
+        private readonly Label _name;
+        private readonly Label _description;
+        private readonly Control _editor;
+        private readonly bool _fullWidth;
+
+        public SettingRow(string name, string description, Control editor, bool fullWidth)
+        {
+            BackColor = Theme.Card;
+            DoubleBuffered = true;
+            _editor = editor;
+            _fullWidth = fullWidth;
+            _name = new Label { Text = name, AutoSize = false, Font = Theme.BodyBold, ForeColor = Theme.Ink, BackColor = Theme.Card, UseMnemonic = false };
+            _description = new Label { Text = description, AutoSize = false, Font = Theme.Small, ForeColor = Theme.Muted, BackColor = Theme.Card, UseMnemonic = false, Visible = description.Length > 0 };
+            Controls.Add(_name);
+            Controls.Add(_description);
+            Controls.Add(editor);
+        }
+
+        /// <summary>カードの最後の行には区切り線を引かない。</summary>
+        public bool Last { get; set; }
+
+        /// <summary>width のときの部品の位置を決め、行の高さを返す。</summary>
+        public int Arrange(int width)
+        {
+            var scale = DeviceDpi / 96F;
+            int padX = (int)(18 * scale), padY = (int)(14 * scale), gap = (int)(20 * scale);
+            var editorWidth = _fullWidth ? 0 : EditorWidth();
+            var textWidth = Math.Max(80, width - padX * 2 - (editorWidth > 0 ? editorWidth + gap : 0));
+            const TextFormatFlags flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix;
+            var nameHeight = TextRenderer.MeasureText(_name.Text, _name.Font, new Size(textWidth, int.MaxValue), flags).Height;
+            var descHeight = _description.Visible ? TextRenderer.MeasureText(_description.Text, _description.Font, new Size(textWidth, int.MaxValue), flags).Height : 0;
+            _name.SetBounds(padX, padY, textWidth, nameHeight);
+            _description.SetBounds(padX, padY + nameHeight + (int)(3 * scale), textWidth, descHeight);
+            var textBottom = padY + nameHeight + (descHeight > 0 ? descHeight + (int)(3 * scale) : 0);
+            if (_fullWidth)
+            {
+                var top = textBottom + (int)(10 * scale);
+                _editor.SetBounds(padX, top, width - padX * 2, _editor.Height);
+                return top + _editor.Height + padY;
+            }
+            var height = Math.Max(textBottom, padY + _editor.Height) + padY;
+            // 部品は右端に、名前の行の高さにそろえて置く (説明が長くても上に寄せる)
+            var editorTop = Math.Max(padY - (int)(4 * scale), padY + (nameHeight - _editor.Height) / 2);
+            if (descHeight == 0) editorTop = (height - _editor.Height) / 2;
+            _editor.SetBounds(width - padX - editorWidth, editorTop, editorWidth, _editor.Height);
+            return height;
+        }
+
+        private int EditorWidth() => _editor switch
+        {
+            SegmentedControl s => s.PreferredWidth(),
+            ToggleSwitch t => t.Width,
+            _ => _editor.Width,
+        };
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (Last) return;
+            using var line = new Pen(Theme.Divider);
+            var inset = (int)(18 * DeviceDpi / 96F);
+            e.Graphics.DrawLine(line, inset, Height - 1, Width - inset, Height - 1);
+        }
     }
 }
