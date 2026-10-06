@@ -751,6 +751,7 @@ internal sealed class SettingsForm : Form
         }
 
         /// <summary>カードの最後の行には区切り線を引かない。</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool Last { get; set; }
 
         /// <summary>width のときの部品の位置を決め、行の高さを返す。</summary>
