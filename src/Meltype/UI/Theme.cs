@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yukishiro
 
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 
 namespace Meltype.UI;
@@ -170,6 +171,7 @@ internal sealed class ToggleSwitch : CheckBox
     }
 
     /// <summary>オンのときの色 (既定はオレンジ)。</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Color OnColor { get; set; } = Theme.Japanese;
 
     protected override void OnPaint(PaintEventArgs e)
@@ -236,6 +238,7 @@ internal sealed class SegmentedControl : Control
         return (int)(_items.Count * (widest + 28 * scale) + 8 * scale);
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int SelectedIndex
     {
         get => _selected;
