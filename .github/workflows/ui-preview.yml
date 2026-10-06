@@ -11,6 +11,8 @@ on:
 jobs:
   render:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -27,6 +29,18 @@ jobs:
         with:
           name: ui-preview
           path: ui-preview/*.png
+      # 画像を ui-preview-images ブランチにも置く (ログインなしで git で取ってこられるように)
+      - name: Publish preview images
+        shell: pwsh
+        run: |
+          Set-Location ui-preview
+          git init -q
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -q -b ui-preview-images
+          git add *.png
+          git commit -qm "ui-preview $env:GITHUB_SHA"
+          git push -f -q "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ui-preview-images
 
   package:
     needs: render
