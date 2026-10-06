@@ -22,7 +22,8 @@ internal static class AppInfo
     public static string ReportUrl(string environment) => Config.ProjectInfo.ReportUrl(Diagnostics.ReportInfo.OsName, Version, environment);
 
     /// <summary>自動更新で最新のリリースを見に行く GitHub のリポジトリ (公開されている必要がある)。</summary>
-    public const string UpdateRepository = "yksr-melt/Meltype";
+    // フォーク (リデザイン版) は、フォークのリリースを見る (本家の更新で見た目が元に戻らないように)
+    public const string UpdateRepository = "xelaods/Meltype";
     public const string Contact = "ibutya0319@gmail.com";
 
     public static string Version =>
